@@ -1,5 +1,7 @@
 # go-snapshot
-Simple asset file generator for Golang. No recursion, no file system interface, no restore. Just generates a big map of compressed byte arrays based on the globs you provide.
+Simple asset file generator for Golang. No recursion, no file system
+interface, no restore. Just generates a big map from a compressed byte
+array based on the globs you provide.
 
 ## How To Install
 Make sure your `GOPATH` is set, then run `go get` to retrieve the
