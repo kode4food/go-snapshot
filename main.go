@@ -22,6 +22,13 @@ type config struct {
 type filedata map[string]string
 
 func main() {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s", err)
+			os.Exit(-1)
+		}
+	}()
+
 	c := parseConfig()
 	validateConfig(c)
 	d := read(c)
