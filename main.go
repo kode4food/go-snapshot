@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -107,12 +108,18 @@ func write(c *config, d filedata) {
 	buf.WriteString(filenames(d))
 	buf.WriteString(data(d))
 	buf.WriteString(functions())
-	ioutil.WriteFile(c.out, buf.Bytes(), os.ModePerm)
+
+	if err := os.MkdirAll(path.Dir(c.out), os.ModePerm); err != nil {
+		panic(err)
+	}
+
+	if err := ioutil.WriteFile(c.out, buf.Bytes(), os.ModePerm); err != nil {
+		panic(err)
+	}
 }
 
 func header(c *config) string {
-	return fmt.Sprintf(`
-package %s
+	return fmt.Sprintf(`package %s
 
 import (
 	"bytes"
@@ -160,7 +167,7 @@ func functions() string {
 func AssetNames() []string {
 	an := make([]string, len(filenames))
 	for i, n := range filenames {
-		an[i] = filenames[i]
+		an[i] = n
 	}
 	return an
 }
