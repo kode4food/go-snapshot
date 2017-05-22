@@ -135,7 +135,26 @@ func (d filedata) compressedImage() string {
 		o = db.Len()
 	}
 	c := compress(db.Bytes())
-	return fmt.Sprintf("var compressed = %s\n\n", c)
+	w := wrap(c, 48, 64)
+	return fmt.Sprintf("var compressed = []byte(%s)\n\n", w)
+}
+
+func wrap(s string, f, r int) string {
+	if f > len(s) {
+		f = len(s)
+	}
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf("\"%s\" +\n", s[0:f]))
+	for s = s[f:]; len(s) > r; s = s[r:] {
+		buf.WriteString(fmt.Sprintf("\t\"%s\"", s[0:r]))
+		if len(s) != r {
+			buf.WriteString(" +\n")
+		}
+	}
+	if s != "" {
+		buf.WriteString(fmt.Sprintf("\t\"%s\"", s))
+	}
+	return buf.String()
 }
 
 func (d filedata) decompressor() string {
@@ -193,7 +212,7 @@ func compress(b []byte) string {
 		p[j] = s[i : i+2]
 		j++
 	}
-	return `[]byte("\x` + strings.Join(p, `\x`) + `")`
+	return `\x` + strings.Join(p, `\x`)
 }
 
 // here because it's too ugly to go anywhere else
