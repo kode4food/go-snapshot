@@ -125,7 +125,7 @@ import (
 
 func filenames(d filedata) string {
 	var buf bytes.Buffer
-	buf.WriteString("var Filenames = []string{\n")
+	buf.WriteString("var filenames = []string{\n")
 	for _, f := range sortedFilenames(d) {
 		buf.WriteString(fmt.Sprintf("\t%q,\n", f))
 	}
@@ -146,7 +146,7 @@ func sortedFilenames(d filedata) []string {
 
 func data(d filedata) string {
 	var buf bytes.Buffer
-	buf.WriteString("var Data = map[string][]byte{\n")
+	buf.WriteString("var data = map[string][]byte{\n")
 	for fn, data := range d {
 		buf.WriteString(fmt.Sprintf("\t%q: []byte(\"%s\"),\n", fn, data))
 	}
@@ -156,13 +156,24 @@ func data(d filedata) string {
 
 func functions() string {
 	return `
+// AssetNames returns a sorted list of all bundled paths
+func AssetNames() []string {
+	an := make([]string, len(filenames))
+	for i, n := range filenames {
+		an[i] = filenames[i]
+	}
+	return an
+}
+
+// Get returns an asset by name
 func Get(fn string) ([]byte, bool) {
-	if d, ok := Data[fn]; ok {
+	if d, ok := data[fn]; ok {
 		return uncompress(d), true
 	}
 	return nil, false
 }
 
+// MustGet returns an asset by name or explodes
 func MustGet(fn string) []byte {
 	if r, ok := Get(fn); ok {
 		return r
