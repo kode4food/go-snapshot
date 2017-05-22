@@ -13,21 +13,36 @@ import (
 	"strings"
 )
 
-type config struct {
-	pkg string
-	out string
-	in  []string
+type fileinfo struct {
+	name  string
+	data  []byte
+	index slice
 }
 
-type filedata map[string]string
+type (
+	filedata []*fileinfo
+	slice    []int
+	slices   map[string]slice
+)
+
+type config struct {
+	pkg  string
+	out  string
+	in   []string
+	data filedata
+}
+
+func (d filedata) Len() int           { return len(d) }
+func (d filedata) Less(i, j int) bool { return d[i].name < d[j].name }
+func (d filedata) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
 
 func main() {
 	defer handlePanic()
-	c := parseConfig()
-	validateConfig(c)
-	d := read(c)
-	validateInput(d)
-	write(c, d)
+	c := &config{
+		out: "assets.go",
+		pkg: "main",
+	}
+	c.run()
 }
 
 func handlePanic() {
@@ -37,15 +52,18 @@ func handlePanic() {
 	}
 }
 
-func parseConfig() *config {
+func (c *config) run() {
+	c.parseConfig()
+	c.validateConfig()
+	c.read()
+	c.validateInput()
+	c.write()
+}
+
+func (c *config) parseConfig() {
 	flag.Usage = func() {
 		fmt.Printf("Usage: %s [options] <file patterns>\n\n", os.Args[0])
 		flag.PrintDefaults()
-	}
-
-	c := &config{
-		out: "assets.go",
-		pkg: "main",
 	}
 
 	flag.StringVar(&c.pkg, "pkg", c.pkg, "Package name for generated code.")
@@ -56,11 +74,9 @@ func parseConfig() *config {
 	for i := range c.in {
 		c.in[i] = flag.Arg(i)
 	}
-
-	return c
 }
 
-func validateConfig(c *config) {
+func (c *config) validateConfig() {
 	if flag.NArg() == 0 {
 		fmt.Fprintf(os.Stderr, "Missing <file pattern>\n\n")
 		flag.Usage()
@@ -68,38 +84,101 @@ func validateConfig(c *config) {
 	}
 }
 
-func validateInput(d filedata) {
-	if len(d) == 0 {
+func (c *config) validateInput() {
+	if len(c.data) == 0 {
 		fmt.Fprintf(os.Stderr, "No assets to bundle\n\n")
 		flag.Usage()
 		os.Exit(3)
 	}
 }
 
-func read(c *config) filedata {
+func (c *config) read() {
 	d := filedata{}
 	for _, pattern := range c.in {
-		readPattern(d, pattern)
+		d = append(d, readPattern(pattern)...)
 	}
-	return d
+	d.sortFiles()
+	c.data = d
 }
 
-func readPattern(d filedata, pattern string) {
+func (c *config) write() {
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf(header, c.pkg))
+	buf.WriteString(fmt.Sprintf("\n\n%s", c.data.String()))
+
+	if err := os.MkdirAll(path.Dir(c.out), os.ModePerm); err != nil {
+		panic(err)
+	}
+
+	if err := ioutil.WriteFile(c.out, buf.Bytes(), os.ModePerm); err != nil {
+		panic(err)
+	}
+}
+
+func (d filedata) sortFiles() {
+	sort.Sort(d)
+}
+
+func (d filedata) String() string {
+	var buf bytes.Buffer
+	buf.WriteString(d.compressedImage())
+	buf.WriteString(d.decompressor())
+	return buf.String()
+}
+
+func (d filedata) compressedImage() string {
+	var db bytes.Buffer
+	o := 0
+	for _, f := range d {
+		db.Write(f.data)
+		f.index = slice{o, db.Len()}
+		o = db.Len()
+	}
+	c := compress(db.Bytes())
+	return fmt.Sprintf("var compressed = %s\n\n", c)
+}
+
+func (d filedata) decompressor() string {
+	var buf bytes.Buffer
+
+	sl := len(d)
+	buf.WriteString(fmt.Sprintf("var data = make(map[string][]byte, %d)\n", sl))
+	buf.WriteString(`
+func init() {
+	uc := uncompress(compressed)
+	compressed = nil
+`)
+
+	for _, f := range d {
+		s := f.index
+		e := fmt.Sprintf("data[%q] = uc[%d:%d]", f.name, s[0], s[1])
+		buf.WriteString(fmt.Sprintf("\t%s\n", e))
+	}
+	buf.WriteString("}\n")
+	return buf.String()
+}
+
+func readPattern(pattern string) filedata {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		panic(fmt.Errorf("couldn't resolve pattern %s", pattern))
 	}
+	d := filedata{}
 	for _, filename := range matches {
-		readFile(d, filename)
+		d = append(d, readFile(filename))
 	}
+	return d
 }
 
-func readFile(d filedata, filename string) {
+func readFile(filename string) *fileinfo {
 	b, err := ioutil.ReadFile(filename)
 	if err != nil {
 		panic(fmt.Errorf("couldn't read from %s", filename))
 	}
-	d[filename] = compress(b)
+	return &fileinfo{
+		name: filename,
+		data: b,
+	}
 }
 
 func compress(b []byte) string {
@@ -114,93 +193,46 @@ func compress(b []byte) string {
 		p[j] = s[i : i+2]
 		j++
 	}
-	return `\x` + strings.Join(p, `\x`)
+	return `[]byte("\x` + strings.Join(p, `\x`) + `")`
 }
 
-func write(c *config, d filedata) {
-	var buf bytes.Buffer
-	buf.WriteString(header(c))
-	buf.WriteString(filenames(d))
-	buf.WriteString(data(d))
-	buf.WriteString(functions())
-
-	if err := os.MkdirAll(path.Dir(c.out), os.ModePerm); err != nil {
-		panic(err)
-	}
-
-	if err := ioutil.WriteFile(c.out, buf.Bytes(), os.ModePerm); err != nil {
-		panic(err)
-	}
-}
-
-func header(c *config) string {
-	return fmt.Sprintf(`package %s
+// here because it's too ugly to go anywhere else
+const header = `package %s
 
 import (
 	"bytes"
 	"compress/gzip"
-	"fmt"
+	"errors"
 	"io"
+	"sort"
 )
-`, c.pkg) + "\n"
-}
 
-func filenames(d filedata) string {
-	var buf bytes.Buffer
-	buf.WriteString("var filenames = []string{\n")
-	for _, f := range sortedFilenames(d) {
-		buf.WriteString(fmt.Sprintf("\t%q,\n", f))
-	}
-	buf.WriteString("}\n\n")
-	return buf.String()
-}
-
-func sortedFilenames(d filedata) []string {
-	fn := make([]string, len(d))
+// AssetNames returns a list of all assets
+func AssetNames() []string {
+	an := make([]string, len(data))
 	i := 0
-	for f := range d {
-		fn[i] = f
+	for k := range data {
+		an[i] = k
 		i++
 	}
-	sort.Strings(fn)
-	return fn
-}
-
-func data(d filedata) string {
-	var buf bytes.Buffer
-	buf.WriteString("var data = map[string][]byte{\n")
-	for fn, data := range d {
-		buf.WriteString(fmt.Sprintf("\t%q: []byte(\"%s\"),\n", fn, data))
-	}
-	buf.WriteString("}\n")
-	return buf.String()
-}
-
-func functions() string {
-	return `
-// AssetNames returns a sorted list of all bundled paths
-func AssetNames() []string {
-	an := make([]string, len(filenames))
-	for i, n := range filenames {
-		an[i] = n
-	}
+	sort.Strings(an)
 	return an
 }
 
 // Get returns an asset by name
-func Get(fn string) ([]byte, bool) {
-	if d, ok := data[fn]; ok {
-		return uncompress(d), true
+func Get(an string) ([]byte, bool) {
+	if d, ok := data[an]; ok {
+		return d, true
 	}
 	return nil, false
 }
 
 // MustGet returns an asset by name or explodes
-func MustGet(fn string) []byte {
-	if r, ok := Get(fn); ok {
+func MustGet(an string) []byte {
+	if r, ok := Get(an); ok {
 		return r
 	}
-	panic(fmt.Errorf("could not find asset: %s", fn))
+	panic(errors.New("could not find asset: "+an))
 }
 
 func uncompress(b []byte) []byte {
@@ -213,4 +245,3 @@ func uncompress(b []byte) []byte {
 	io.Copy(&buf, r)
 	return buf.Bytes()
 }`
-}
