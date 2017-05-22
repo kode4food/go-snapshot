@@ -148,8 +148,8 @@ import (
 func filenames(d filedata) string {
 	var buf bytes.Buffer
 	buf.WriteString("var filenames = []string{\n")
-	for _, f := range sortedFilenames(d) {
-		buf.WriteString(fmt.Sprintf("\t%q,\n", f))
+	for _, fn := range sortedFilenames(d) {
+		buf.WriteString(fmt.Sprintf("\t%q,\n", fn))
 	}
 	buf.WriteString("}\n\n")
 	return buf.String()
@@ -169,8 +169,8 @@ func sortedFilenames(d filedata) []string {
 func data(d filedata) string {
 	var buf bytes.Buffer
 	buf.WriteString("var data = map[string][]byte{\n")
-	for fn, data := range d {
-		buf.WriteString(fmt.Sprintf("\t%q: []byte(\"%s\"),\n", fn, data))
+	for _, fn := range sortedFilenames(d) {
+		buf.WriteString(fmt.Sprintf("\t%q: []byte(\"%s\"),\n", fn, d[fn]))
 	}
 	buf.WriteString("}\n")
 	return buf.String()
