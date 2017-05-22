@@ -22,26 +22,32 @@ type config struct {
 type filedata map[string]string
 
 func main() {
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Fprintf(os.Stderr, "%s", err)
-			os.Exit(-1)
-		}
-	}()
-
+	defer handlePanic()
 	c := parseConfig()
 	validateConfig(c)
 	d := read(c)
+	validateInput(d)
 	write(c, d)
+}
+
+func handlePanic() {
+	if err := recover(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s", err)
+		os.Exit(-1)
+	}
 }
 
 func parseConfig() *config {
 	flag.Usage = func() {
-		fmt.Printf("Usage: %s [options] <input directories>\n\n", os.Args[0])
+		fmt.Printf("Usage: %s [options] <file patterns>\n\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
-	c := &config{}
+	c := &config{
+		out: "assets.go",
+		pkg: "main",
+	}
+
 	flag.StringVar(&c.pkg, "pkg", c.pkg, "Package name for generated code.")
 	flag.StringVar(&c.out, "out", c.out, "Output file to be generated.")
 	flag.Parse()
@@ -56,15 +62,17 @@ func parseConfig() *config {
 
 func validateConfig(c *config) {
 	if flag.NArg() == 0 {
-		fmt.Fprintf(os.Stderr, "Missing <input dir>\n\n")
+		fmt.Fprintf(os.Stderr, "Missing <file pattern>\n\n")
 		flag.Usage()
 		os.Exit(1)
 	}
+}
 
-	if c.out == "" || c.pkg == "" {
-		fmt.Fprintf(os.Stderr, "Package and output file are required\n\n")
+func validateInput(d filedata) {
+	if len(d) == 0 {
+		fmt.Fprintf(os.Stderr, "No assets to bundle\n\n")
 		flag.Usage()
-		os.Exit(2)
+		os.Exit(3)
 	}
 }
 
