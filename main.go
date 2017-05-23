@@ -11,12 +11,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type fileinfo struct {
 	name  string
 	data  []byte
 	index slice
+	mod   time.Time
 }
 
 type (
@@ -33,7 +35,7 @@ type config struct {
 }
 
 func (d filedata) Len() int           { return len(d) }
-func (d filedata) Less(i, j int) bool { return d[i].name < d[j].name }
+func (d filedata) Less(i, j int) bool { return d[i].mod.Before(d[j].mod) }
 func (d filedata) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
 
 func main() {
@@ -194,9 +196,14 @@ func readFile(filename string) *fileinfo {
 	if err != nil {
 		panic(fmt.Errorf("couldn't read from %s", filename))
 	}
+	fi, err := os.Stat(filename)
+	if err != nil {
+		panic(fmt.Errorf("couldn't stat %s", filename))
+	}
 	return &fileinfo{
 		name: filename,
 		data: b,
+		mod:  fi.ModTime(),
 	}
 }
 
