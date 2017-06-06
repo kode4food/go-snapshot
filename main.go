@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -11,14 +12,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 )
 
 type fileinfo struct {
-	name  string
-	data  []byte
-	index slice
-	mod   time.Time
+	name string
+	data []byte
 }
 
 type (
@@ -34,10 +32,6 @@ type config struct {
 	data filedata
 }
 
-func (d filedata) Len() int           { return len(d) }
-func (d filedata) Less(i, j int) bool { return d[i].mod.Before(d[j].mod) }
-func (d filedata) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
-
 func main() {
 	defer handlePanic()
 	c := &config{
@@ -52,6 +46,18 @@ func handlePanic() {
 		fmt.Fprintf(os.Stderr, "%s", err)
 		os.Exit(-1)
 	}
+}
+
+func (d filedata) Len() int {
+	return len(d)
+}
+
+func (d filedata) Less(i, j int) bool {
+	return strings.Compare(d[i].name, d[j].name) < 0
+}
+
+func (d filedata) Swap(i, j int) {
+	d[i], d[j] = d[j], d[i]
 }
 
 func (c *config) run() {
@@ -123,39 +129,7 @@ func (d filedata) sortFiles() {
 
 func (d filedata) String() string {
 	var buf bytes.Buffer
-	buf.WriteString(d.compressedImage())
 	buf.WriteString(d.decompressor())
-	return buf.String()
-}
-
-func (d filedata) compressedImage() string {
-	var db bytes.Buffer
-	o := 0
-	for _, f := range d {
-		db.Write(f.data)
-		f.index = slice{o, db.Len()}
-		o = db.Len()
-	}
-	c := compress(db.Bytes())
-	w := wrap(c, 48, 64)
-	return fmt.Sprintf("var compressed = []byte(%s)\n\n", w)
-}
-
-func wrap(s string, f, r int) string {
-	if f > len(s) {
-		f = len(s)
-	}
-	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("\"%s\" +\n", s[0:f]))
-	for s = s[f:]; len(s) > r; s = s[r:] {
-		buf.WriteString(fmt.Sprintf("\t\"%s\"", s[0:r]))
-		if len(s) != r {
-			buf.WriteString(" +\n")
-		}
-	}
-	if s != "" {
-		buf.WriteString(fmt.Sprintf("\t\"%s\"", s))
-	}
 	return buf.String()
 }
 
@@ -166,13 +140,11 @@ func (d filedata) decompressor() string {
 	buf.WriteString(fmt.Sprintf("var data = make(map[string][]byte, %d)\n", sl))
 	buf.WriteString(`
 func init() {
-	uc := uncompress(compressed)
-	compressed = nil
 `)
 
 	for _, f := range d {
-		s := f.index
-		e := fmt.Sprintf("data[%q] = uc[%d:%d]", f.name, s[0], s[1])
+		c := compress(f.data)
+		e := fmt.Sprintf("data[%q] = decompress(\"%s\")", f.name, c)
 		buf.WriteString(fmt.Sprintf("\t%s\n", e))
 	}
 	buf.WriteString("}\n")
@@ -196,14 +168,9 @@ func readFile(filename string) *fileinfo {
 	if err != nil {
 		panic(fmt.Errorf("couldn't read from %s", filename))
 	}
-	fi, err := os.Stat(filename)
-	if err != nil {
-		panic(fmt.Errorf("couldn't stat %s", filename))
-	}
 	return &fileinfo{
 		name: filename,
 		data: b,
-		mod:  fi.ModTime(),
 	}
 }
 
@@ -213,13 +180,7 @@ func compress(b []byte) string {
 	w.Write(b)
 	w.Close()
 
-	s := fmt.Sprintf("%x", buf.Bytes())
-	p := make([]string, len(s)/2)
-	for i, j := 0, 0; i < len(s); i += 2 {
-		p[j] = s[i : i+2]
-		j++
-	}
-	return `\x` + strings.Join(p, `\x`)
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
 // here because it's too ugly to go anywhere else
@@ -228,6 +189,7 @@ const header = `package %s
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"errors"
 	"io"
 	"sort"
@@ -261,7 +223,8 @@ func MustGet(an string) []byte {
 	panic(errors.New("could not find asset: " + an))
 }
 
-func uncompress(b []byte) []byte {
+func decompress(s string) []byte {
+	b, _ := base64.StdEncoding.DecodeString(s)
 	r, err := gzip.NewReader(bytes.NewBuffer(b))
 	if err != nil {
 		panic(err)
