@@ -8,7 +8,7 @@ Make sure your `GOPATH` is set, then run `go get` to retrieve the
 package.
 
 ```bash
-go get github.com/kode4food/go-snapshot
+go get gitlab.com/kode4food/go-snapshot
 ```
 
 ## How To Use
